@@ -2,7 +2,7 @@ import json
 from typing import Optional
 
 from ui.components import appbar, divider, load_css, result_card_html, section_title
-from services.utils import get_omdb_api_key
+OMDB_API_KEY = "3b628e0a"
 from models import MovieDetails, CocktailPairing
 
 import streamlit as st
@@ -44,17 +44,13 @@ def render_search_form():
 
 
 def run_search(title: str, year: Optional[str]):
-    api_key = get_omdb_api_key()
-    if not api_key:
-        st.error(C.ERROR_OMDB_KEY_NOT_CONFIGURED)
-        matches = []
-    else:
-        with st.spinner(C.SPINNER_SEARCHING):
-            try:
-                matches = omdb_search_cached(title, year, api_key)
-            except Exception:
-                matches = []
-                st.error(C.ERROR_SEARCH_FAILED)
+    api_key = OMDB_API_KEY
+    with st.spinner(C.SPINNER_SEARCHING):
+        try:
+            matches = omdb_search_cached(title, year, api_key)
+        except Exception:
+            matches = []
+            st.error(C.ERROR_SEARCH_FAILED)
     st.session_state[C.KEY_LAST_MATCHES] = matches
     st.session_state[C.KEY_LAST_QUERY] = title
     st.session_state[C.KEY_LAST_YEAR] = year
@@ -161,23 +157,22 @@ def render_pairing_dialog(movie: MovieDetails, pairing: CocktailPairing):
 def maybe_show_dialog():
     selected = st.session_state.get(C.KEY_SELECTED_MOVIE)
     if not selected:
-        return
-
-    import requests
-
-    def fetch_cocktail_pairing(movie_title: str):
         try:
-            resp = requests.post(
-                "http://localhost:8000/pairing", json={"movie": movie_title}, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("success") and data.get("cocktail"):
-                    return CocktailPairing(
-                        name=data["cocktail"]["name"],
-                        recipe=data["cocktail"].get("ingredients", []),
-                        why=data.get("explanation", "")
-                    )
-            return None
+            api_key = OMDB_API_KEY
+            from services.omdb import get_movie_by_id
+            details = get_movie_by_id(m["id"], api_key)
+            payload = {
+                "title": details.get("Title"),
+                "year": details.get("Year"),
+                "genre": details.get("Genre"),
+                "director": details.get("Director"),
+                "runtime": details.get("Runtime"),
+                "plot": details.get("Plot"),
+                "poster": details.get("Poster"),
+            }
+            st.session_state[C.KEY_SELECTED_MOVIE_JSON] = json.dumps(payload)
+        except Exception:
+            pass
         except Exception:
             return None
 
