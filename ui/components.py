@@ -29,7 +29,10 @@ def divider() -> None:
 
 
 def result_card_html(poster_url: str | None, title: str, year: str | None) -> str:
-    poster_html = f"<img src='{poster_url}' alt='Poster' class='poster' />" if poster_url else ""
+    if poster_url:
+        poster_html = f"<img src='{poster_url}' alt='Poster' class='poster' onerror=\"this.onerror=null;this.src='';this.parentNode.innerHTML='<div class=\'no-poster\'>No poster available</div>'\" />"
+    else:
+        poster_html = "<div class='no-poster'>No poster available</div>"
     return f"""
     <div class='result-card'>
         {poster_html}

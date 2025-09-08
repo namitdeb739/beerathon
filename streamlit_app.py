@@ -63,6 +63,7 @@ def run_search(title: str, year: Optional[str]):
 def on_choose_movie(m: dict):
     st.session_state[C.KEY_SELECTED_MOVIE] = m
     st.session_state[C.KEY_OPEN_COCKTAIL_DIALOG] = True
+    st.session_state["show_loading"] = True
     try:
         api_key = get_omdb_api_key()
         if api_key:
@@ -121,79 +122,98 @@ def build_movie_details(selected: dict, payload_json: Optional[str]) -> MovieDet
 
 
 def render_pairing_dialog(movie: MovieDetails, pairing: CocktailPairing):
-    st.markdown("<div class='dialog-grid'>", unsafe_allow_html=True)
-    st.markdown("<div class='dialog-section'>", unsafe_allow_html=True)
-    if movie.poster:
-        st.markdown(
-            f"<img src='{movie.poster}' alt='Poster' class='poster' />",
-            unsafe_allow_html=True,
+    st.markdown("""
+        <style>
+        .fullwidth-dialog .stButton, .fullwidth-dialog .stMarkdown, .fullwidth-dialog .stImage {max-width: 100vw !important;}
+        .fullwidth-dialog {width: 100vw !important; max-width: 100vw !important; margin-left: -10vw; margin-right: -10vw;}
+        </style>
+    """, unsafe_allow_html=True)
+    with st.container():
+        cols = st.columns([1, 1], gap="large")
+        with cols[0]:
+            if movie.poster:
+                st.image(movie.poster, use_container_width=True)
+            st.markdown(f"### {movie.title} {'(' + movie.year + ')' if movie.year else ''}")
+            meta = " • ".join([b for b in [movie.genre, movie.director, movie.runtime] if b])
+            if meta:
+                st.markdown(f"*{meta}*")
+            if movie.plot:
+                st.markdown("**Plot**")
+                st.write(movie.plot)
+        with cols[1]:
+            st.markdown(f"### 🍸 {pairing.name}")
+            st.markdown(f"*{C.PAIRING_SUBTITLE}*")
+            st.markdown("**Recipe**")
+            for ingredient in pairing.recipe:
+                st.markdown(f"- {ingredient}")
+            st.markdown("**Why this cocktail?**")
+            st.write(pairing.why)
+        st.button(
+            C.BTN_CLOSE,
+            key="close_cocktail_dialog_btn",
+            use_container_width=True,
+            on_click=lambda: st.session_state.update(
+                {C.KEY_OPEN_COCKTAIL_DIALOG: False, C.KEY_COCKTAIL_INFO: None}
+            ),
         )
-    title_line = movie.title + (f" ({movie.year})" if movie.year else "")
-    st.markdown(
-        f"<div class='cocktail-name'>{title_line}</div>", unsafe_allow_html=True)
-    bits = [b for b in [movie.genre, movie.director, movie.runtime] if b]
-    if bits:
-        st.markdown(
-            f"<div class='cocktail-meta'>{' • '.join(bits)}</div>", unsafe_allow_html=True)
-    if movie.plot:
-        st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
-        st.markdown("<b>Plot</b>")
-        st.write(movie.plot)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown("<div class='dialog-section'>", unsafe_allow_html=True)
-    st.markdown(
-        f"<div class='cocktail-name'>🍹 {pairing.name}</div>", unsafe_allow_html=True)
-    st.markdown(
-        f"<div class='cocktail-meta'>{C.PAIRING_SUBTITLE}</div>", unsafe_allow_html=True)
-    st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
-    st.markdown(f"<b>{C.LABEL_RECIPE}</b>")
-    st.markdown(
-        "<ul class='recipe-list'>" +
-        "".join([f"<li>{i}</li>" for i in pairing.recipe]) + "</ul>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(f"<b>{C.LABEL_WHY}</b>")
-    st.markdown(pairing.why)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.button(
-        C.BTN_CLOSE,
-        key="close_cocktail_dialog_btn",
-        use_container_width=True,
-        on_click=lambda: st.session_state.update(
-            {C.KEY_OPEN_COCKTAIL_DIALOG: False, C.KEY_COCKTAIL_INFO: None}
-        ),
-    )
 
 
 def maybe_show_dialog():
     selected = st.session_state.get(C.KEY_SELECTED_MOVIE)
     if not selected:
         return
-    from services.cocktails import get_cocktail_for_movie
+
+    import requests
+
+    def fetch_cocktail_pairing(movie_title: str):
+        try:
+            resp = requests.post(
+                "http://localhost:8000/pairing", json={"movie": movie_title}, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success") and data.get("cocktail"):
+                    return CocktailPairing(
+                        name=data["cocktail"]["name"],
+                        recipe=data["cocktail"].get("ingredients", []),
+                        why=data.get("explanation", "")
+                    )
+            return None
+        except Exception:
+            return None
+
+    pairing = None
+    loading = st.session_state.get("show_loading", True)
     if st.session_state.get(C.KEY_OPEN_COCKTAIL_DIALOG) and not st.session_state.get(C.KEY_COCKTAIL_INFO):
-        st.session_state[C.KEY_COCKTAIL_INFO] = get_cocktail_for_movie(
-            selected.get("title", "")
-        )
-    pairing = st.session_state.get(C.KEY_COCKTAIL_INFO) or get_cocktail_for_movie(
-        selected.get("title", "")
-    )
+        if loading:
+            st.markdown("""
+                <div style='position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999;background:rgba(20,20,30,0.85);display:flex;justify-content:center;align-items:center;'>
+                    <div style='text-align:center;'>
+                        <div style='font-size:3rem;'>⏳</div>
+                        <div style='margin-top:1rem;font-size:1.3rem;color:#ffd700;'>Finding your perfect cocktail pairing...</div>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+        pairing = fetch_cocktail_pairing(selected.get("title", ""))
+        st.session_state[C.KEY_COCKTAIL_INFO] = pairing
+        st.session_state["show_loading"] = False
+        loading = False
+    if pairing is None:
+        pairing = st.session_state.get(C.KEY_COCKTAIL_INFO)
+    if pairing is None:
+        pairing = fetch_cocktail_pairing(selected.get("title", ""))
+
     movie = build_movie_details(
         selected, st.session_state.get(C.KEY_SELECTED_MOVIE_JSON))
-    if hasattr(st, "dialog"):
-        try:
-            def _content():
-                render_pairing_dialog(movie, pairing)
-            st.dialog(C.DIALOG_TITLE)(_content)()
-            return
-        except Exception:
-            pass
-    with st.container():
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
+    if pairing and not loading:
+        if hasattr(st, "dialog"):
+            try:
+                def _content():
+                    render_pairing_dialog(movie, pairing)
+                st.dialog(C.DIALOG_TITLE)(_content)()
+                return
+            except Exception:
+                pass
         render_pairing_dialog(movie, pairing)
-        st.markdown("</div>", unsafe_allow_html=True)
 
 
 def main() -> None:
