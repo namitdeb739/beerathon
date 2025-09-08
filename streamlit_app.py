@@ -1,12 +1,11 @@
+import app_constants as C
+import streamlit as st
+from models import MovieDetails, CocktailPairing
 import json
 from typing import Optional
 
 from ui.components import appbar, divider, load_css, result_card_html, section_title
 OMDB_API_KEY = "3b628e0a"
-from models import MovieDetails, CocktailPairing
-
-import streamlit as st
-import app_constants as C
 
 
 st.set_page_config(layout="wide", page_title=C.APP_TITLE,
@@ -61,28 +60,29 @@ def on_choose_movie(m: dict):
     st.session_state[C.KEY_OPEN_COCKTAIL_DIALOG] = True
     st.session_state["show_loading"] = True
     try:
-        api_key = get_omdb_api_key()
-        if api_key:
-            from services.omdb import get_movie_by_id
-            details = get_movie_by_id(m["id"], api_key)
-            payload = {
-                "title": details.get("Title"),
-                "year": details.get("Year"),
-                "genre": details.get("Genre"),
-                "plot": details.get("Plot"),
-                "director": details.get("Director"),
-                "runtime": details.get("Runtime"),
-            }
-            st.session_state[C.KEY_SELECTED_MOVIE_JSON] = json.dumps(payload)
-        else:
-            st.session_state[C.KEY_SELECTED_MOVIE_JSON] = json.dumps({
-                "title": m.get("title"),
-                "year": m.get("year"),
-            })
+        api_key = OMDB_API_KEY
+        from services.omdb import get_movie_by_id
+        imdb_id = str(m.get("id") or "")
+        details = get_movie_by_id(imdb_id, api_key)
+        payload = {
+            "title": details.get("Title"),
+            "year": details.get("Year"),
+            "genre": details.get("Genre"),
+            "director": details.get("Director"),
+            "runtime": details.get("Runtime"),
+            "plot": details.get("Plot"),
+            "poster": details.get("Poster"),
+        }
+        st.session_state[C.KEY_SELECTED_MOVIE_JSON] = json.dumps(payload)
     except Exception:
         st.session_state[C.KEY_SELECTED_MOVIE_JSON] = json.dumps({
             "title": m.get("title"),
             "year": m.get("year"),
+            "genre": m.get("genre"),
+            "director": m.get("director"),
+            "runtime": m.get("runtime"),
+            "plot": m.get("plot"),
+            "poster": m.get("poster"),
         })
 
 
@@ -129,8 +129,10 @@ def render_pairing_dialog(movie: MovieDetails, pairing: CocktailPairing):
         with cols[0]:
             if movie.poster:
                 st.image(movie.poster, use_container_width=True)
-            st.markdown(f"### {movie.title} {'(' + movie.year + ')' if movie.year else ''}")
-            meta = " • ".join([b for b in [movie.genre, movie.director, movie.runtime] if b])
+            st.markdown(
+                f"### {movie.title} {'(' + movie.year + ')' if movie.year else ''}")
+            meta = " • ".join(
+                [b for b in [movie.genre, movie.director, movie.runtime] if b])
             if meta:
                 st.markdown(f"*{meta}*")
             if movie.plot:
@@ -157,25 +159,24 @@ def render_pairing_dialog(movie: MovieDetails, pairing: CocktailPairing):
 def maybe_show_dialog():
     selected = st.session_state.get(C.KEY_SELECTED_MOVIE)
     if not selected:
+        return
+    import requests
+
+    def fetch_cocktail_pairing(movie_title: str):
         try:
-            api_key = OMDB_API_KEY
-            from services.omdb import get_movie_by_id
-            details = get_movie_by_id(m["id"], api_key)
-            payload = {
-                "title": details.get("Title"),
-                "year": details.get("Year"),
-                "genre": details.get("Genre"),
-                "director": details.get("Director"),
-                "runtime": details.get("Runtime"),
-                "plot": details.get("Plot"),
-                "poster": details.get("Poster"),
-            }
-            st.session_state[C.KEY_SELECTED_MOVIE_JSON] = json.dumps(payload)
-        except Exception:
-            pass
+            resp = requests.post(
+                "http://localhost:8000/pairing", json={"movie": movie_title}, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success") and data.get("cocktail"):
+                    return CocktailPairing(
+                        name=data["cocktail"]["name"],
+                        recipe=data["cocktail"].get("ingredients", []),
+                        why=data.get("explanation", "")
+                    )
+            return None
         except Exception:
             return None
-
     pairing = None
     loading = st.session_state.get("show_loading", True)
     if st.session_state.get(C.KEY_OPEN_COCKTAIL_DIALOG) and not st.session_state.get(C.KEY_COCKTAIL_INFO):
@@ -196,9 +197,10 @@ def maybe_show_dialog():
         pairing = st.session_state.get(C.KEY_COCKTAIL_INFO)
     if pairing is None:
         pairing = fetch_cocktail_pairing(selected.get("title", ""))
-
-    movie = build_movie_details(
-        selected, st.session_state.get(C.KEY_SELECTED_MOVIE_JSON))
+    movie_json = st.session_state.get(C.KEY_SELECTED_MOVIE_JSON)
+    if not movie_json:
+        return
+    movie = build_movie_details(selected, movie_json)
     if pairing and not loading:
         if hasattr(st, "dialog"):
             try:
